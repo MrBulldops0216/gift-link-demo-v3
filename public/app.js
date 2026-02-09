@@ -67,32 +67,32 @@ let lastSuggestedReplies = [];
 const uiTuneDefaults = {
   // Chat panel positioning
   chatPanelX: '',
-  chatPanelY: 0,
-  chatPanelW: 30,
-  chatPanelH: 100,
-  chatPanelScale: 1,
+  chatPanelY: 3,
+  chatPanelW: 34,
+  chatPanelH: 98,
+  chatPanelScale: 1.01,
   
   // Chat frame safe-area padding
-  chatPadTop: 24,
-  chatPadRight: 20,
-  chatPadBottom: 20,
-  chatPadLeft: 20,
+  chatPadTop: 100,
+  chatPadRight: 25,
+  chatPadBottom: 33,
+  chatPadLeft: 26,
   
   // HUD tuning
-  hudTopOffset: 0,
-  hudPaddingTop: 0,
-  hudTitleFontSize: 15,
+  hudTopOffset: -50,
+  hudPaddingTop: 20,
+  hudTitleFontSize: 40,
   hudIconSize: 38,
-  hudIconGap: 10,
-  hudRowGap: 12,
-  hudJustify: 'space-between',
-  starIconSize: 38,
-  xIconSize: 38,
+  hudIconGap: 18,
+  hudRowGap: 0,
+  hudJustify: 'center',
+  starIconSize: 60,
+  xIconSize: 60,
   
   // Font sizes
-  suggestedItemFontSize: 16,
-  inputFontSize: 14,
-  messageFontSize: 14,
+  suggestedItemFontSize: 28,
+  inputFontSize: 28,
+  messageFontSize: 28,
   
   // Intro card font sizes
   introTitleFontSize: 24,
@@ -100,33 +100,34 @@ const uiTuneDefaults = {
   introButtonFontSize: 16,
   
   // Chip font size
-  chipFontSize: 12,
+  chipFontSize: 28,
   
   // Thought bubble tuning
-  thoughtX: 50, // percentage
-  thoughtY: 15, // percentage
+  thoughtX: 55, // percentage
+  thoughtY: 23, // percentage
   thoughtWidth: 260,
-  thoughtFontSize: 14,
-  thoughtDurationMs: 3000,
+  thoughtFontSize: 28,
+  thoughtDurationMs: 300,
   
   // Background stage tuning
-  stageScale: 1,
-  stageOffsetX: 0,
-  stageOffsetY: 0,
+  stageScale: 1.64,
+  stageOffsetX: 200,
+  stageOffsetY: -30,
   
   // Video fit
-  videoFit: 'contain',
+  videoFit: 'cover',
   
   // Welcome image tuning
-  welcomeX: 50, // percentage
-  welcomeY: 50, // percentage
+  welcomeX: 53, // percentage
+  welcomeY: 51, // percentage
   welcomeMaxWidth: 80, // percentage
   welcomeMaxHeight: 80, // percentage
-  welcomeScale: 1
+  welcomeScale: 1.2
 };
 
 let uiTune = { ...uiTuneDefaults };
 let debugMode = false;
+const isDebugRoute = window.location.pathname.endsWith('/debug');
 
 function escapeRegExp(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -336,10 +337,19 @@ function loadUITune() {
     const saved = localStorage.getItem('uiTune');
     if (saved) {
       const parsed = JSON.parse(saved);
+      if (parsed.videoFit === 'contain') {
+        parsed.videoFit = 'cover';
+      }
       uiTune = { ...uiTuneDefaults, ...parsed };
+      applyUITune();
+      return;
     }
   } catch (e) {
     console.error('Failed to load uiTune:', e);
+  }
+  uiTune = { ...uiTuneDefaults };
+  if (isDebugRoute) {
+    localStorage.setItem('uiTune', JSON.stringify(uiTune));
   }
   applyUITune();
 }
@@ -423,6 +433,7 @@ function applyUITune() {
 
 // Save UI tuning to localStorage
 function saveUITune() {
+  if (!isDebugRoute) return;
   try {
     localStorage.setItem('uiTune', JSON.stringify(uiTune));
   } catch (e) {
@@ -432,6 +443,7 @@ function saveUITune() {
 
 // Update UI tuning value
 function updateUITune(key, value) {
+  if (!isDebugRoute) return;
   uiTune[key] = value;
   applyUITune();
   saveUITune();
@@ -804,6 +816,12 @@ function initializeApp() {
     showOverlay.addEventListener('change', () => {
       updateSafeAreaOverlay();
     });
+  }
+
+  if (!isDebugRoute) {
+    if (debugBtn) debugBtn.classList.add('hidden');
+    if (debugPanel) debugPanel.classList.add('hidden');
+    if (safeAreaOverlay) safeAreaOverlay.classList.add('hidden');
   }
 
   if (langEnBtn) {
@@ -1622,6 +1640,7 @@ function showAnalysisModal(analysis, outcome) {
 
 // Toggle debug panel
 function toggleDebug() {
+  if (!isDebugRoute) return;
   debugMode = !debugMode;
   if (debugMode) {
     debugPanel.classList.remove('hidden');
