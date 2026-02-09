@@ -132,6 +132,7 @@ const uiTuneDefaults = {
 let uiTune = { ...uiTuneDefaults };
 let debugMode = false;
 const isDebugRoute = window.location.pathname.endsWith('/debug');
+const useSavedTune = isDebugRoute && new URLSearchParams(window.location.search).get('useSaved') === '1';
 
 function escapeRegExp(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -337,27 +338,29 @@ async function playScene(src, options = {}) {
 
 // Load UI tuning from localStorage
 function loadUITune() {
-  try {
-    const saved = localStorage.getItem('uiTune');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      // Keep saved videoFit as-is; do not coerce on load
-      // Convert legacy % values to px for fixed sizing
-      if (typeof parsed.chatPanelW === 'number' && parsed.chatPanelW <= 100) {
-        parsed.chatPanelW = Math.round((window.innerWidth || 0) * (parsed.chatPanelW / 100));
+  if (useSavedTune) {
+    try {
+      const saved = localStorage.getItem('uiTune');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Keep saved videoFit as-is; do not coerce on load
+        // Convert legacy % values to px for fixed sizing
+        if (typeof parsed.chatPanelW === 'number' && parsed.chatPanelW <= 100) {
+          parsed.chatPanelW = Math.round((window.innerWidth || 0) * (parsed.chatPanelW / 100));
+        }
+        if (typeof parsed.chatPanelH === 'number' && parsed.chatPanelH <= 100) {
+          parsed.chatPanelH = Math.round((window.innerHeight || 0) * (parsed.chatPanelH / 100));
+        }
+        uiTune = { ...uiTuneDefaults, ...parsed };
+        applyUITune();
+        return;
       }
-      if (typeof parsed.chatPanelH === 'number' && parsed.chatPanelH <= 100) {
-        parsed.chatPanelH = Math.round((window.innerHeight || 0) * (parsed.chatPanelH / 100));
-      }
-      uiTune = { ...uiTuneDefaults, ...parsed };
-      applyUITune();
-      return;
+    } catch (e) {
+      console.error('Failed to load uiTune:', e);
     }
-  } catch (e) {
-    console.error('Failed to load uiTune:', e);
   }
   uiTune = { ...uiTuneDefaults };
-  if (isDebugRoute) {
+  if (isDebugRoute && useSavedTune) {
     localStorage.setItem('uiTune', JSON.stringify(uiTune));
   }
   applyUITune();
