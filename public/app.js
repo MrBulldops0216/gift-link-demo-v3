@@ -122,7 +122,7 @@ const uiTuneDefaults = {
   welcomeY: 52, // percentage
   welcomeMaxWidth: 80, // percentage
   welcomeMaxHeight: 80, // percentage
-  welcomeScale: 1.3,
+  welcomeScale: 1.4,
 
   // Base design size (used to scale layout)
   designWidth: 2560,
