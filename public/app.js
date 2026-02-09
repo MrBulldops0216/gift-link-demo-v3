@@ -110,8 +110,8 @@ const uiTuneDefaults = {
   thoughtDurationMs: 300,
   
   // Background stage tuning
-  stageScale: 1.78,
-  stageOffsetX: 200,
+  stageScale: 1.14,
+  stageOffsetX: 49,
   stageOffsetY: 8,
   
   // Video fit
