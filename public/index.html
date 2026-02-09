@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<!--
+  CHILD SAFETY INTERVENTION GAME
+  
+  VIDEO ASSETS INSTRUCTIONS:
+  Place your video files in: ./assets/motion/
+  
+  Required files:
+  - kid_base.mp4 (default/idle loop)
+  - kid_good.mp4 (positive reaction)
+  - kid_confused.mp4 (confused state)
+  - kid_sad.mp4 (sad state)
+  - kid_open.mp4 (failure ending: child clicks/popup opens)
+  - kid_close.mp4 (success ending: popup closes)
+  
+  All videos should be 16:9 aspect ratio.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Child Safety Intervention Game</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Language Switcher -->
+    <div id="language-switcher" class="language-switcher">
+      <button id="lang-en" class="lang-btn active" data-lang="en">EN</button>
+      <button id="lang-zh-tw" class="lang-btn" data-lang="zh_TW">繁</button>
+    </div>
+
+    <!-- LLM Status Badge -->
+    <div id="llm-status" class="status-badge" data-i18n="ui.llm.ready">LLM: ready</div>
+    
+    <!-- Debug Button -->
+    <button id="debug-btn" class="debug-btn" data-i18n="ui.debug">Debug</button>
+    <div id="debug-panel" class="debug-panel hidden">
+      <h3 data-i18n="ui.debugTitle">Debug & Adjust</h3>
+      <div class="debug-controls">
+        <label>
+          <input type="checkbox" id="show-overlay">
+          <span data-i18n="ui.showOverlay">Show Safe Area Overlay</span>
+        </label>
+      </div>
+      <div id="debug-content" class="debug-tuner"></div>
+      <div class="debug-actions">
+        <button id="debug-reset" class="debug-reset-btn" data-i18n="ui.reset">Reset</button>
+        <button id="debug-copy-css" class="debug-copy-btn" data-i18n="ui.copyCss">Copy CSS</button>
+        <button id="debug-copy-json" class="debug-copy-btn" data-i18n="ui.copyJson">Copy JSON</button>
+        <button id="debug-close" data-i18n="ui.close">Close</button>
+      </div>
+    </div>
+    
+    <!-- Safe Area Overlay -->
+    <div id="safe-area-overlay" class="safe-area-overlay hidden"></div>
+    
+    <!-- Main Container -->
+    <div class="main-container">
+      <!-- Left: Video Background -->
+      <div id="video-container" class="video-container">
+        <!-- Welcome Image (shown on initial black screen) -->
+        <img id="welcome-image" src="/assets/UI/welcome.png" alt="Welcome" class="welcome-image">
+        <div id="bgVideoStage" class="bgVideoStage">
+          <video id="bgVideoA" class="bgVideo bgVideo--active" autoplay muted playsinline></video>
+          <video id="bgVideoB" class="bgVideo" autoplay muted playsinline></video>
+        </div>
+        <!-- Thought Bubble -->
+        <div id="thoughtBubble" class="thoughtBubble hidden">
+          <div class="thoughtBubble__text"></div>
+          <div class="thoughtBubble__dots">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Right: Chat Panel -->
+      <div id="chat-panel" class="chat-panel">
+        <!-- Intro Card (shown on initial load) -->
+        <div id="intro-card" class="intro-card">
+          <h2 class="intro-card__title" data-i18n="intro.title">Alex needs your help</h2>
+          <p class="intro-card__subtitle" data-i18n="intro.subtitle">Reply in chat to prevent risky clicks.</p>
+          <button id="start-btn" class="intro-card__btn" data-i18n="intro.start">Start</button>
+        </div>
+        
+        <!-- Main Content (hidden until Start is clicked) -->
+        <div id="main-content" class="main-content hidden">
+          <!-- HUD (Goal + Progress) -->
+          <div class="hud">
+            <div class="hud__title" data-i18n="hud.goal">Goal: Help the child make safe choices</div>
+            <div class="hud__progress">
+              <div class="hud__stars"></div>
+              <div class="hud__xs"></div>
+            </div>
+          </div>
+          
+          <!-- Chat History -->
+          <div id="chat-history" class="chat-history"></div>
+          
+          <!-- Reply Composer -->
+          <div class="reply-composer">
+            <!-- Suggested Replies (always visible) -->
+            <div class="suggested-replies-section">
+              <div id="suggested-replies" class="suggested-replies"></div>
+            </div>
+            
+            <!-- Input Area (always visible) -->
+            <div class="input-area">
+              <input 
+                type="text" 
+                id="message-input" 
+                class="message-input" 
+                placeholder="Type your message..."
+                data-i18n="input.placeholder"
+                autocomplete="off"
+              >
+              <button id="send-btn" class="send-btn" data-i18n="input.send">Send</button>
+            </div>
+            
+            <!-- More Options Toggle -->
+            <div class="more-options-section">
+              <button id="more-options-btn" class="more-options-btn" data-i18n="more.moreOptions">More options</button>
+            </div>
+            
+            <!-- Advanced Tools (collapsed by default) -->
+            <div id="advanced-tools" class="advanced-tools hidden">
+              <!-- Chip Composer -->
+              <div class="chip-composer-section">
+                <div class="chip-category">
+                  <div class="chip-label" data-i18n="chips.toneLabel">Tone:</div>
+                  <div class="chip-group" data-category="tone" data-max="1">
+                    <button class="chip-btn" data-chip="reassure" data-i18n="chips.reassure">Reassure</button>
+                    <button class="chip-btn" data-chip="praise" data-i18n="chips.praise">Praise</button>
+                    <button class="chip-btn" data-chip="warn" data-i18n="chips.warn">Warn</button>
+                    <button class="chip-btn" data-chip="neutral" data-i18n="chips.neutral">Neutral</button>
+                  </div>
+                </div>
+                <div class="chip-category">
+                  <div class="chip-label" data-i18n="chips.strategyLabel">Strategy:</div>
+                  <div class="chip-group" data-category="strategy" data-max="1">
+                    <button class="chip-btn" data-chip="ask" data-i18n="chips.ask">Ask</button>
+                    <button class="chip-btn" data-chip="explain" data-i18n="chips.explain">Explain</button>
+                    <button class="chip-btn" data-chip="boundary" data-i18n="chips.boundary">Boundary</button>
+                  </div>
+                </div>
+                <div class="chip-category">
+                  <div class="chip-label" data-i18n="chips.actionLabel">Action:</div>
+                  <div class="chip-group" data-category="action" data-max="2">
+                    <button class="chip-btn" data-chip="dont-click" data-i18n="chips.dontClick">Don't click</button>
+                    <button class="chip-btn" data-chip="screenshot" data-i18n="chips.screenshot">Screenshot</button>
+                    <button class="chip-btn" data-chip="show-link" data-i18n="chips.showLink">Show me the link</button>
+                    <button class="chip-btn" data-chip="ask-adult" data-i18n="chips.askAdult">Ask an adult</button>
+                  </div>
+                </div>
+                <div class="chip-actions">
+                  <button id="clear-chips-btn" class="chip-action-btn" data-i18n="chips.clear">Clear chips</button>
+                  <button id="generate-suggestions-btn" class="chip-action-btn" data-i18n="chips.generate">Generate Suggestions</button>
+                </div>
+              </div>
+              
+              <!-- Draft Preview -->
+              <div class="draft-preview-section">
+                <div class="draft-label" data-i18n="draft.label">Draft:</div>
+                <div id="draft-preview" class="draft-preview" contenteditable="true" data-i18n="draft.placeholder">Select chips to build a message...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- End Game Overlay -->
+    <div id="end-overlay" class="end-overlay hidden">
+      <div class="end-message"></div>
+    </div>
+    
+    <!-- Intervention Analysis Modal -->
+    <div id="analysis-modal" class="analysis-modal hidden">
+      <div class="analysis-content">
+        <h2 class="analysis-title" data-i18n="analysis.title">Intervention Analysis Report</h2>
+        <div id="analysis-body" class="analysis-body">
+          <!-- Content will be populated by JavaScript -->
+        </div>
+        <div class="analysis-actions">
+          <button id="close-analysis-btn" class="analysis-btn" data-i18n="analysis.close">Close</button>
+          <button id="restart-analysis-btn" class="analysis-btn" data-i18n="analysis.restart">Restart</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="translations.js"></script>
+  <script src="language.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

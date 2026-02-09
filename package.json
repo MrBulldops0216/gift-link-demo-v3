@@ -1,0 +1,22 @@
+{
+  "name": "child-safety-intervention-game",
+  "version": "1.0.0",
+  "description": "Web-based experimental game demo for child online safety intervention",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "child-safety",
+    "intervention",
+    "game"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.1"
+  }
+}

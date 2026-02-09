@@ -1,0 +1,40 @@
+.thought-bubble {
+  position: absolute;
+  top: 20%;
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity 0.5s ease-in-out;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.thought-bubble.visible {
+  opacity: 1;
+}
+
+.thought-bubble-content {
+  background-color: rgba(255, 255, 255, 0.95);
+  color: #333;
+  padding: 16px 20px;
+  border-radius: 20px;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.5;
+  max-width: 300px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  position: relative;
+  text-align: center;
+}
+
+.thought-bubble-tail {
+  position: absolute;
+  bottom: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 12px solid transparent;
+  border-right: 12px solid transparent;
+  border-top: 12px solid rgba(255, 255, 255, 0.95);
+}
