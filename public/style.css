@@ -397,8 +397,6 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  transform: scale(var(--stage-scale)) translate(var(--stage-offset-x), var(--stage-offset-y));
-  transform-origin: center center;
   pointer-events: none;
 }
 
@@ -449,6 +447,8 @@ body {
   height: 100%;
   overflow: visible;
   background: transparent;
+  transform: scale(var(--stage-scale)) translate(var(--stage-offset-x), var(--stage-offset-y));
+  transform-origin: center center;
 }
 
 .bgVideo {

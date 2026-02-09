@@ -118,11 +118,11 @@ const uiTuneDefaults = {
   videoFit: 'contain',
   
   // Welcome image tuning
-  welcomeX: 42, // percentage
-  welcomeY: 51, // percentage
+  welcomeX: 48, // percentage
+  welcomeY: 52, // percentage
   welcomeMaxWidth: 80, // percentage
   welcomeMaxHeight: 80, // percentage
-  welcomeScale: 0.8,
+  welcomeScale: 1.3,
 
   // Base design size (used to scale layout)
   designWidth: 2560,
