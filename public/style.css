@@ -77,6 +77,9 @@ body {
   width: 100%;
   height: 100%;
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Status Badge */
@@ -334,9 +337,15 @@ body {
 /* Main Container */
 .main-container {
   position: relative;
-  width: 100%;
-  height: 100%;
+  width: var(--design-w, 1440px);
+  height: var(--design-h, 900px);
   overflow: hidden;
+  transform: scale(var(--layout-scale, 1));
+  transform-origin: center center;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
 }
 
 /* Language Switcher */
@@ -378,14 +387,13 @@ body {
 /* Video Container (Left side, fills remaining space) */
 .video-container {
   position: absolute;
-  left: 0;
-  top: 0;
-  right: var(--chat-panel-w);
+  inset: 0;
+  width: 100%;
   height: 100%;
   background-color: #000;
   opacity: 1; /* Initially visible to show welcome image on black screen */
   transition: opacity 0.75s ease-in-out;
-  overflow: visible;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -529,10 +537,10 @@ body {
 /* Chat Panel (Right side, absolute positioned) */
 .chat-panel {
   position: absolute;
+  top: calc(var(--chat-panel-y, 0) * 1px);
   right: 0;
-  top: var(--chat-panel-y);
-  width: var(--chat-panel-w);
-  height: var(--chat-panel-h);
+  width: var(--chat-panel-w-px, 520px);
+  height: var(--chat-panel-h-px, 720px);
   background-image: url("/assets/UI/chat.png");
   background-size: 100% 100%;
   background-repeat: no-repeat;
@@ -552,6 +560,8 @@ body {
   opacity: 1;
   transform: translateX(0) scale(var(--chat-panel-scale));
 }
+
+/* Layout is fixed; no responsive reflow */
 
 /* Intro Card */
 .intro-card {

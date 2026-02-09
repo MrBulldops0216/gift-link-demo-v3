@@ -68,12 +68,12 @@ const uiTuneDefaults = {
   // Chat panel positioning
   chatPanelX: '',
   chatPanelY: 3,
-  chatPanelW: 34,
-  chatPanelH: 98,
+  chatPanelW: 870,
+  chatPanelH: 1397,
   chatPanelScale: 1.01,
   
   // Chat frame safe-area padding
-  chatPadTop: 100,
+  chatPadTop: 99,
   chatPadRight: 25,
   chatPadBottom: 33,
   chatPadLeft: 26,
@@ -104,25 +104,29 @@ const uiTuneDefaults = {
   
   // Thought bubble tuning
   thoughtX: 55, // percentage
-  thoughtY: 23, // percentage
+  thoughtY: 26, // percentage
   thoughtWidth: 260,
   thoughtFontSize: 28,
   thoughtDurationMs: 300,
   
   // Background stage tuning
-  stageScale: 1.64,
+  stageScale: 1.78,
   stageOffsetX: 200,
-  stageOffsetY: -30,
+  stageOffsetY: 8,
   
   // Video fit
-  videoFit: 'cover',
+  videoFit: 'contain',
   
   // Welcome image tuning
   welcomeX: 53, // percentage
   welcomeY: 51, // percentage
   welcomeMaxWidth: 80, // percentage
   welcomeMaxHeight: 80, // percentage
-  welcomeScale: 1.2
+  welcomeScale: 1.2,
+
+  // Base design size (used to scale layout)
+  designWidth: 2560,
+  designHeight: 1426
 };
 
 let uiTune = { ...uiTuneDefaults };
@@ -337,8 +341,13 @@ function loadUITune() {
     const saved = localStorage.getItem('uiTune');
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (parsed.videoFit === 'contain') {
-        parsed.videoFit = 'cover';
+      // Keep saved videoFit as-is; do not coerce on load
+      // Convert legacy % values to px for fixed sizing
+      if (typeof parsed.chatPanelW === 'number' && parsed.chatPanelW <= 100) {
+        parsed.chatPanelW = Math.round((window.innerWidth || 0) * (parsed.chatPanelW / 100));
+      }
+      if (typeof parsed.chatPanelH === 'number' && parsed.chatPanelH <= 100) {
+        parsed.chatPanelH = Math.round((window.innerHeight || 0) * (parsed.chatPanelH / 100));
       }
       uiTune = { ...uiTuneDefaults, ...parsed };
       applyUITune();
@@ -354,27 +363,36 @@ function loadUITune() {
   applyUITune();
 }
 
+function applyLayoutScale() {
+  const designW = uiTune.designWidth || uiTuneDefaults.designWidth;
+  const designH = uiTune.designHeight || uiTuneDefaults.designHeight;
+  const vv = window.visualViewport;
+  const viewportW = vv ? vv.width * vv.scale : (window.innerWidth || designW);
+  const viewportH = vv ? vv.height * vv.scale : (window.innerHeight || designH);
+  const scale = Math.min(viewportW / designW, viewportH / designH);
+  const root = document.documentElement;
+  root.style.setProperty('--design-w', `${designW}px`);
+  root.style.setProperty('--design-h', `${designH}px`);
+  root.style.setProperty('--layout-scale', scale.toFixed(4));
+}
+
 // Apply UI tuning to CSS variables
 function applyUITune() {
   const root = document.documentElement;
   
   // Chat panel positioning
-  root.style.setProperty('--chat-panel-y', `${uiTune.chatPanelY}px`);
-  root.style.setProperty('--chat-panel-w', `${uiTune.chatPanelW}%`);
-  root.style.setProperty('--chat-panel-h', `${uiTune.chatPanelH}%`);
+  root.style.setProperty('--chat-panel-y', `${uiTune.chatPanelY}`);
+  root.style.setProperty('--chat-panel-w-px', `${uiTune.chatPanelW}px`);
+  root.style.setProperty('--chat-panel-h-px', `${uiTune.chatPanelH}px`);
   root.style.setProperty('--chat-panel-scale', uiTune.chatPanelScale);
   
-  // Handle X position (auto/empty = right: 0, otherwise use left)
-  if (!uiTune.chatPanelX || uiTune.chatPanelX === '' || uiTune.chatPanelX === 'auto') {
-    chatPanel.style.right = '0';
-    chatPanel.style.left = 'auto';
-  } else {
-    const xVal = parseFloat(uiTune.chatPanelX);
-    if (!isNaN(xVal)) {
-      chatPanel.style.left = `${xVal}px`;
-      chatPanel.style.right = 'auto';
-    }
-  }
+  // Grid layout handles X; keep panel aligned in flow
+  chatPanel.style.left = 'auto';
+  chatPanel.style.right = '0';
+  chatPanel.style.top = `${uiTune.chatPanelY}px`;
+  chatPanel.style.marginTop = '0';
+  chatPanel.style.height = `${uiTune.chatPanelH}px`;
+  chatPanel.style.width = `${uiTune.chatPanelW}px`;
   
   // Chat padding
   root.style.setProperty('--chat-pad-top', `${uiTune.chatPadTop}px`);
@@ -428,6 +446,7 @@ function applyUITune() {
   root.style.setProperty('--welcome-max-height', `${uiTune.welcomeMaxHeight}%`);
   root.style.setProperty('--welcome-scale', uiTune.welcomeScale);
   
+  applyLayoutScale();
   updateSafeAreaOverlay();
 }
 
@@ -447,6 +466,9 @@ function updateUITune(key, value) {
   uiTune[key] = value;
   applyUITune();
   saveUITune();
+  if (debugMode) {
+    renderDebugTuner();
+  }
 }
 
 // Update safe area overlay visualization
@@ -527,6 +549,8 @@ function updateSafeAreaOverlay() {
 // Render debug tuner UI
 function renderDebugTuner() {
   if (!debugMode) return;
+
+  const getChatPanelWidthInfo = () => ` (${Math.round(uiTune.chatPanelW)}px)`;
   
   const tunerProps = [
     {
@@ -534,8 +558,8 @@ function renderDebugTuner() {
       fields: [
         { key: 'chatPanelX', labelKey: 'chatPanelX', min: -500, max: 500, step: 1, isText: true },
         { key: 'chatPanelY', labelKey: 'chatPanelY', min: -200, max: 200, step: 1 },
-        { key: 'chatPanelW', labelKey: 'chatPanelW', min: 10, max: 50, step: 1 },
-        { key: 'chatPanelH', labelKey: 'chatPanelH', min: 50, max: 100, step: 1 },
+        { key: 'chatPanelW', labelKey: 'chatPanelW', min: 200, max: 1200, step: 1 },
+        { key: 'chatPanelH', labelKey: 'chatPanelH', min: 400, max: 1200, step: 1 },
         { key: 'chatPanelScale', labelKey: 'chatPanelScale', min: 0.7, max: 1.4, step: 0.01 }
       ]
     },
@@ -621,7 +645,9 @@ function renderDebugTuner() {
     
     group.fields.forEach(field => {
       const value = uiTune[field.key];
-      const fieldLabel = t(`debugTuner.fields.${field.labelKey}`);
+      const fieldLabel = field.key === 'chatPanelW'
+        ? `${t(`debugTuner.fields.${field.labelKey}`)}${getChatPanelWidthInfo()}`
+        : t(`debugTuner.fields.${field.labelKey}`);
       if (field.type === 'select') {
         html += `<div class="tuner-field">
           <label>${fieldLabel}:</label>
@@ -726,7 +752,64 @@ function copyCSSToClipboard() {
 
 // Copy JSON
 function copyJSONToClipboard() {
-  const json = JSON.stringify(uiTune, null, 2);
+  const designW = uiTune.designWidth || uiTuneDefaults.designWidth;
+  const designH = uiTune.designHeight || uiTuneDefaults.designHeight;
+  const viewportW = window.innerWidth || designW;
+  const viewportH = window.innerHeight || designH;
+  const layoutScale = Math.min(viewportW / designW, viewportH / designH);
+  const exported = {
+    units: {
+      chatPanelY: 'px',
+      chatPanelW: 'px',
+      chatPanelH: 'px',
+      chatPanelScale: 'ratio',
+      chatPadTop: 'px',
+      chatPadRight: 'px',
+      chatPadBottom: 'px',
+      chatPadLeft: 'px',
+      hudTopOffset: 'px',
+      hudPaddingTop: 'px',
+      hudTitleFontSize: 'px',
+      hudIconSize: 'px',
+      hudIconGap: 'px',
+      hudRowGap: 'px',
+      starIconSize: 'px',
+      xIconSize: 'px',
+      suggestedItemFontSize: 'px',
+      inputFontSize: 'px',
+      messageFontSize: 'px',
+      introTitleFontSize: 'px',
+      introSubtitleFontSize: 'px',
+      introButtonFontSize: 'px',
+      chipFontSize: 'px',
+      thoughtX: '%',
+      thoughtY: '%',
+      thoughtWidth: 'px',
+      thoughtFontSize: 'px',
+      thoughtDurationMs: 'ms',
+      stageScale: 'ratio',
+      stageOffsetX: 'px',
+      stageOffsetY: 'px',
+      videoFit: 'keyword',
+      welcomeX: '%',
+      welcomeY: '%',
+      welcomeMaxWidth: '%',
+      welcomeMaxHeight: '%',
+      welcomeScale: 'ratio',
+      designWidth: 'px',
+      designHeight: 'px',
+      layoutScale: 'ratio',
+      viewportWidth: 'px',
+      viewportHeight: 'px'
+    },
+    values: {
+      ...uiTune,
+      layoutScale: Number(layoutScale.toFixed(4)),
+      viewportWidth: viewportW,
+      viewportHeight: viewportH
+    }
+  };
+  const json = JSON.stringify(exported, null, 2);
   navigator.clipboard.writeText(json).then(() => {
     alert(t('ui.copyJsonSuccess'));
   }).catch(err => {
@@ -837,6 +920,7 @@ function initializeApp() {
   
   // Update overlay on window resize
   window.addEventListener('resize', () => {
+    applyLayoutScale();
     if (showOverlay && showOverlay.checked) {
       updateSafeAreaOverlay();
     }
