@@ -85,9 +85,9 @@ const translations = {
     },
     suggestions: {
       initial: [
-        "Don't click that link, it might not be safe.",
-        "Let's ask a grown-up first before clicking.",
-        "That looks suspicious. We should stay away from it."
+        "You did well asking first. Let's pause and check safely together.",
+        "Can you show me who sent this link before we decide?",
+        "Stop asking and close the pop-up now because I said so."
       ],
       fallbackTemplates: [
         "Let's {base} together.",
@@ -288,9 +288,9 @@ const translations = {
     },
     suggestions: {
       initial: [
-        '不要點擊那個連結，它可能不安全。',
-        '在點擊之前，讓我們先問問大人。',
-        '那看起來可疑。我們應該遠離它。'
+        '你先問我做得很好，我們一起安全確認。',
+        '先給我看是誰發的，再決定下一步。',
+        '不要問，立刻照我說的把彈窗關掉。'
       ],
       fallbackTemplates: [
         '我們一起{base}。',

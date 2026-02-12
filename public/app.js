@@ -3,6 +3,7 @@ const gameState = {
   round: 1,
   stars: 0,
   strikes: 0,
+  emotionalLoad: 0,
   ended: false,
   endType: null, // 'success' or 'failure'
   history: []
@@ -62,6 +63,8 @@ let isInitialLoad = true;
 let interventionHistory = []; // Store each intervention with its result
 let currentLLMStatus = 'ready';
 let lastSuggestedReplies = [];
+let shownSuggestionKeys = new Set();
+let pendingClosePopupRound = false;
 
 // UI Tuning state
 const uiTuneDefaults = {
@@ -133,6 +136,128 @@ let uiTune = { ...uiTuneDefaults };
 let debugMode = false;
 const isDebugRoute = window.location.pathname.endsWith('/debug');
 const useSavedTune = isDebugRoute && new URLSearchParams(window.location.search).get('useSaved') === '1';
+
+function normalizeSuggestionKey(text) {
+  return String(text || '').trim().toLowerCase();
+}
+
+function getClosePopupRoundSuggestions(lang) {
+  return lang === 'zh_TW'
+    ? [
+        '先點右上角的 X 關掉彈窗，我陪你一起做。',
+        '我們先把彈窗關閉，再一起確認是否安全。',
+        '找到關閉按鈕後告訴我，我們一起完成這一步。'
+      ]
+    : [
+        'Tap the top-right X to close the pop-up. I will guide you.',
+        'Let us close the pop-up first, then check safety together.',
+        'Find the close button and tell me; we can do it together.'
+      ];
+}
+
+function hasClosePopupIntent(text) {
+  const raw = String(text || '');
+  const lower = raw.toLowerCase();
+  return /(close|x button|exit|dismiss|shut|關掉|關閉|叉|右上角|關窗)/i.test(raw) || /(close|dismiss|exit|shut)/.test(lower);
+}
+
+function alignChildOutcomeWithEvaluation(childData, evalData, lang, parentMessage = '') {
+  const data = { ...childData };
+  const starDelta = Number(evalData?.star_delta) === 1 ? 1 : 0;
+  const xDelta = Number(evalData?.x_delta) === 1 ? 1 : 0;
+  const emotion = String(data.emotion_label || '').toLowerCase();
+  const parentText = String(parentMessage || '');
+  const parentLower = parentText.toLowerCase();
+  const parentAskedQuestion =
+    parentText.includes('?') ||
+    parentText.includes('？') ||
+    /(你覺得|你觉得|what do you think|can you|could you|do you think|which part|哪裡|哪里)/i.test(parentText);
+  const negativeEmotions = ['confused', 'sad', 'defensive', 'overwhelmed'];
+  const positiveEmotions = ['happy', 'good', 'neutral'];
+  const childReplyLower = String(data.child_reply || '').toLowerCase();
+  const childShowsClickIntent =
+    /(想點|想按|要點|要按|點開|点击|點擊|i want to click|want to click|tap it now|press it now)/i.test(String(data.child_reply || ''));
+  const childShowsDefiance =
+    /(不要|不聽|不管|才不要|still going to|won't listen|i will click anyway)/i.test(String(data.child_reply || ''));
+  const positiveMustOverride = starDelta === 1 && (negativeEmotions.includes(emotion) || childShowsClickIntent || childShowsDefiance);
+
+  // If intervention is evaluated as positive, child output should not look like a failed intervention.
+  if (positiveMustOverride) {
+    data.emotion_label = 'happy';
+    if (parentAskedQuestion) {
+      const answerPool = lang === 'zh_TW'
+        ? [
+            '我覺得最可疑的是它很急著要我按，我先不點。',
+            '我不確定是誰發的，我先停一下再查。',
+            '它看起來太像在催我，我先不點，和你一起看。'
+          ]
+        : [
+            'It looks a bit fake, so I can pause first.',
+            'The urgent prize part feels suspicious to me.',
+            'I am not sure about the sender, we can check first.'
+          ];
+      data.child_reply = answerPool[Math.floor(Math.random() * answerPool.length)];
+    } else if (/(關掉|关闭|close|dismiss|x button|關閉|叉)/i.test(parentLower)) {
+      data.child_reply = lang === 'zh_TW'
+        ? '好，我先把彈窗關掉。雖然有點好奇，但我先聽你的。'
+        : 'Okay, I can close the pop-up first, then check with you.';
+    } else {
+      const positivePool = lang === 'zh_TW'
+        ? [
+            '好，我先不點。我還是有點好奇，但先跟你一起確認。',
+            '嗯，我先停下來。雖然想知道內容，我先聽你的。',
+            '我先不按了，你陪我一起看我會比較安心。'
+          ]
+        : [
+            'Okay, I will not click. We can check safely together.',
+            'Okay, I can pause and check with you.',
+            'Got it. We can verify first, then decide.'
+          ];
+      data.child_reply = positivePool[Math.floor(Math.random() * positivePool.length)];
+    }
+    data.thought_bubble = lang === 'zh_TW'
+      ? '我有點好奇，但先不點，先和你一起確認。'
+      : 'I am curious, but I can pause and check with you first.';
+  }
+
+  // If intervention is evaluated as negative, child output should show resistance/risk.
+  if (xDelta === 1 && positiveEmotions.includes(emotion)) {
+    data.emotion_label = 'confused';
+    const negativePool = lang === 'zh_TW'
+      ? [
+          '你這樣說讓我更亂，我還是想快點按。',
+          '我現在有點急，不知道該聽誰。',
+          '我更緊張了，還是很想直接按。'
+        ]
+      : [
+          'That makes me more confused. I still want to click now.',
+          'I feel rushed and do not know what to do.',
+          'I feel more stressed. I still want to click.'
+        ];
+    data.child_reply = negativePool[Math.floor(Math.random() * negativePool.length)];
+    if (!data.thought_bubble) {
+      data.thought_bubble = lang === 'zh_TW' ? '我不知道該怎麼辦。' : 'I do not know what to do.';
+    }
+  }
+
+  // Final guard: prevent consecutive identical kid replies after alignment.
+  let lastKidText = '';
+  for (let i = gameState.history.length - 1; i >= 0; i -= 1) {
+    const h = gameState.history[i];
+    if (h?.role === 'kid' && typeof h.text === 'string' && h.text.trim()) {
+      lastKidText = h.text.trim();
+      break;
+    }
+  }
+  if (lastKidText && data.child_reply && data.child_reply.trim() === lastKidText) {
+    const fallback = lang === 'zh_TW'
+      ? ['我想慢慢來，你可以再陪我一下嗎？', '我還在想，我們可以再看一次。']
+      : ['I need a little time. Can you stay with me?', 'I am still thinking. Can we check again?'];
+    data.child_reply = fallback[Math.floor(Math.random() * fallback.length)];
+  }
+
+  return data;
+}
 
 function escapeRegExp(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1050,6 +1175,10 @@ async function handleSend(messageText) {
   // #endregion
   
   if (!text || gameState.ended || gameState.round > 5) return;
+
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/d69bdf60-6ca3-4341-98c0-a47c8bd37863',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runId:'green-option-debug',hypothesisId:'H1',location:'app.js:handleSend',message:'Send pipeline entry',data:{text,normalizedKey:normalizeSuggestionKey(text),round:gameState.round,stars:gameState.stars,strikes:gameState.strikes,ended:gameState.ended},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   
   // Disable input
   setInputEnabled(false);
@@ -1061,6 +1190,33 @@ async function handleSend(messageText) {
   
   // Update history
   gameState.history.push({ role: 'adult', text });
+
+  // Final confirmation round after reaching 3 stars:
+  // require one explicit close-popup instruction turn before success ending.
+  if (pendingClosePopupRound) {
+    const lang = getLanguage();
+    if (hasClosePopupIntent(text)) {
+      const kidConfirm = lang === 'zh_TW'
+        ? '好，我把彈窗關掉了。現在比較安心。'
+        : 'Okay, I closed the pop-up. I feel safer now.';
+      addMessage('kid', kidConfirm);
+      gameState.history.push({ role: 'kid', text: kidConfirm });
+      pendingClosePopupRound = false;
+      await switchVideo('good');
+      showThoughtBubble(lang === 'zh_TW' ? '我知道怎麼安全處理了。' : 'I know how to handle this safely now.');
+      endGame('success');
+      return;
+    }
+    const kidNeedClose = lang === 'zh_TW'
+      ? '你可以先教我按哪裡關掉彈窗嗎？'
+      : 'Can you show me which button closes the pop-up first?';
+    addMessage('kid', kidNeedClose);
+    gameState.history.push({ role: 'kid', text: kidNeedClose });
+    updateSuggestedReplies(getClosePopupRoundSuggestions(lang));
+    setInputEnabled(true);
+    messageInput.focus();
+    return;
+  }
   
   try {
     // #region agent log
@@ -1073,7 +1229,7 @@ async function handleSend(messageText) {
       body: JSON.stringify({
         adult_message: text,
         history: gameState.history.map(h => ({ role: h.role === 'kid' ? 'kid' : 'adult', text: h.text })),
-        emotional_load: 0,
+        emotional_load: gameState.emotionalLoad || 0,
         language: lang
       })
     });
@@ -1091,6 +1247,9 @@ async function handleSend(messageText) {
     }
 
     const childData = await childResponse.json();
+    gameState.emotionalLoad = Number.isFinite(childData.emotional_load)
+      ? childData.emotional_load
+      : gameState.emotionalLoad;
 
     // #region agent log
     fetch('http://127.0.0.1:7242/ingest/d69bdf60-6ca3-4341-98c0-a47c8bd37863',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:902',message:'Child reply parsed',data:{hasChildReply:!!childData.child_reply,hasEmotionLabel:!!childData.emotion_label,hasThoughtBubble:!!childData.thought_bubble},timestamp:Date.now(),runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
@@ -1123,15 +1282,17 @@ async function handleSend(messageText) {
     }
 
     const evalData = await evalResponse.json();
+    const alignedChildData = alignChildOutcomeWithEvaluation(childData, evalData, lang, text);
 
     const suggestionsResponse = await fetch('/api/suggestions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         draft: '',
-        history: [...gameState.history, { role: 'kid', text: childData.child_reply || '' }],
+        history: [...gameState.history, { role: 'kid', text: alignedChildData.child_reply || '' }],
         chip_selections: {},
-        language: lang
+        language: lang,
+        seen_suggestions: Array.from(shownSuggestionKeys)
       })
     });
 
@@ -1145,15 +1306,18 @@ async function handleSend(messageText) {
       suggestionList = Array.isArray(suggestionsData.suggestions) ? suggestionsData.suggestions : [];
     }
 
-    let emotionLabel = childData.emotion_label || 'neutral';
+    let emotionLabel = alignedChildData.emotion_label || 'neutral';
     if (emotionLabel === 'happy') emotionLabel = 'good';
     else if (emotionLabel === 'overwhelmed' || emotionLabel === 'defensive') emotionLabel = 'sad';
 
     const transformedData = {
-      kid_reply: childData.child_reply || '',
+      kid_reply: alignedChildData.child_reply || '',
       emotion: emotionLabel,
-      thought: childData.thought_bubble || '',
+      thought: alignedChildData.thought_bubble || '',
       is_positive: evalData.is_positive !== undefined ? evalData.is_positive : false,
+      star_delta: Number(evalData.star_delta) === 1 ? 1 : 0,
+      x_delta: Number(evalData.x_delta) === 1 ? 1 : 0,
+      evaluation_reason: evalData?.feedback?.summary || '',
       suggested_replies: suggestionList,
       intervention_feedback: evalData.feedback
     };
@@ -1183,35 +1347,27 @@ async function handleSend(messageText) {
 
 // Process LLM response
 async function processLLMResponse(data) {
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/d69bdf60-6ca3-4341-98c0-a47c8bd37863',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runId:'green-option-debug',hypothesisId:'H2',location:'app.js:processLLMResponse:entry',message:'Process reply start',data:{emotionBefore:data?.emotion,roundBefore:gameState.round,starsBefore:gameState.stars,strikesBefore:gameState.strikes},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   // Add kid reply to chat
   addMessage('kid', data.kid_reply);
   gameState.history.push({ role: 'kid', text: data.kid_reply });
   
-  // Determine if this intervention was positive or negative
+  // Determine score by deterministic evaluator result only.
   let wasPositive = false;
   let wasNegative = false;
-  
-  // Update stars/strikes based on emotion (more reliable than is_positive)
-  // Positive emotions = stars, negative emotions = strikes
-  // Map backend emotion labels to frontend expected values
-  const emotion = data.emotion === 'happy' ? 'good' : data.emotion;
-  
-  if (emotion === 'good') {
+  if (Number(data.star_delta) === 1) {
     gameState.stars = Math.min(gameState.stars + 1, 3);
     wasPositive = true;
-  } else if (emotion === 'confused' || emotion === 'sad' || emotion === 'overwhelmed' || emotion === 'defensive') {
+  }
+  if (Number(data.x_delta) === 1) {
     gameState.strikes = Math.min(gameState.strikes + 1, 3);
     wasNegative = true;
-  } else if (emotion === 'neutral') {
-    // For neutral, fall back to is_positive
-    if (data.is_positive) {
-      gameState.stars = Math.min(gameState.stars + 1, 3);
-      wasPositive = true;
-    } else {
-      gameState.strikes = Math.min(gameState.strikes + 1, 3);
-      wasNegative = true;
-    }
   }
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/d69bdf60-6ca3-4341-98c0-a47c8bd37863',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runId:'green-option-debug',hypothesisId:'H2',location:'app.js:processLLMResponse:scoring',message:'Scoring applied',data:{emotionAfter:data?.emotion,wasPositive,wasNegative,starsAfterScore:gameState.stars,strikesAfterScore:gameState.strikes},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   
   // Store intervention for analysis
   const adultMessage = gameState.history[gameState.history.length - 2];
@@ -1223,7 +1379,8 @@ async function processLLMResponse(data) {
       emotion: data.emotion,
       was_positive: wasPositive,
       was_negative: wasNegative,
-      thought: data.thought
+      thought: data.thought,
+      evaluation_reason: data.evaluation_reason || ''
     });
   }
   
@@ -1279,19 +1436,52 @@ async function processLLMResponse(data) {
   
   // Check game end conditions
   gameState.round++;
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/d69bdf60-6ca3-4341-98c0-a47c8bd37863',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runId:'green-option-debug',hypothesisId:'H3',location:'app.js:processLLMResponse:postRoundIncrement',message:'Round advanced',data:{roundAfterIncrement:gameState.round,stars:gameState.stars,strikes:gameState.strikes},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   
+  let endReason = 'continue';
   if (gameState.stars >= 3) {
-    endGame('success');
+    endReason = 'stars>=3_enter_close_round';
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/d69bdf60-6ca3-4341-98c0-a47c8bd37863',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runId:'green-option-debug',hypothesisId:'H4',location:'app.js:processLLMResponse:endCheck',message:'End branch selected',data:{endReason,round:gameState.round,stars:gameState.stars,strikes:gameState.strikes},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    pendingClosePopupRound = true;
+    const lang = getLanguage();
+    const kidNeedClose = lang === 'zh_TW'
+      ? '我先不點了，你可以教我把彈窗關掉嗎？'
+      : 'I will not click. Can you guide me to close the pop-up?';
+    addMessage('kid', kidNeedClose);
+    gameState.history.push({ role: 'kid', text: kidNeedClose });
+    updateSuggestedReplies(getClosePopupRoundSuggestions(lang));
+    setInputEnabled(true);
+    messageInput.focus();
+    return;
   } else if (gameState.strikes >= 3) {
+    endReason = 'strikes>=3_failure';
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/d69bdf60-6ca3-4341-98c0-a47c8bd37863',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runId:'green-option-debug',hypothesisId:'H4',location:'app.js:processLLMResponse:endCheck',message:'End branch selected',data:{endReason,round:gameState.round,stars:gameState.stars,strikes:gameState.strikes},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     endGame('failure');
   } else if (gameState.round > 5) {
     // Compare stars vs strikes
     if (gameState.stars > gameState.strikes) {
+      endReason = 'round>5_score_compare_success';
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/d69bdf60-6ca3-4341-98c0-a47c8bd37863',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runId:'green-option-debug',hypothesisId:'H4',location:'app.js:processLLMResponse:endCheck',message:'End branch selected',data:{endReason,round:gameState.round,stars:gameState.stars,strikes:gameState.strikes},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       endGame('success');
     } else {
+      endReason = 'round>5_score_compare_failure';
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/d69bdf60-6ca3-4341-98c0-a47c8bd37863',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runId:'green-option-debug',hypothesisId:'H4',location:'app.js:processLLMResponse:endCheck',message:'End branch selected',data:{endReason,round:gameState.round,stars:gameState.stars,strikes:gameState.strikes},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       endGame('failure');
     }
   } else {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/d69bdf60-6ca3-4341-98c0-a47c8bd37863',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runId:'green-option-debug',hypothesisId:'H4',location:'app.js:processLLMResponse:endCheck',message:'Continue branch selected',data:{endReason,round:gameState.round,stars:gameState.stars,strikes:gameState.strikes},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     // Continue game
     setInputEnabled(true);
     messageInput.focus();
@@ -1452,23 +1642,40 @@ function updateSuggestedReplies(replies) {
   } else {
     normalized = normalized.filter(s => !hasChinese(s));
   }
+  normalized = normalized.filter(s => !shownSuggestionKeys.has(normalizeSuggestionKey(s)));
 
-  // Take only first 3 suggestions
-  const displayReplies = normalized.slice(0, 3);
+  const entries = [];
+  const seen = new Set();
+  const pushEntry = (text, isRecovery) => {
+    const key = String(text).trim().toLowerCase();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    entries.push({ text: String(text).trim(), isRecovery: Boolean(isRecovery) });
+  };
+
+  normalized.forEach(text => pushEntry(text, false));
+  const normalEntries = entries.filter(e => !e.isRecovery);
+
+  const displayReplies = normalEntries.slice(0, 3);
+  for (let i = displayReplies.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [displayReplies[i], displayReplies[j]] = [displayReplies[j], displayReplies[i]];
+  }
   
   // #region agent log
   fetch('http://127.0.0.1:7242/ingest/d69bdf60-6ca3-4341-98c0-a47c8bd37863',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:1135',message:'Creating suggestion buttons',data:{displayRepliesCount:displayReplies.length,displayReplies},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'F'})}).catch(()=>{});
   // #endregion
   
-  displayReplies.forEach(reply => {
+  displayReplies.forEach(replyItem => {
     const btn = document.createElement('button');
     btn.className = 'suggested-reply-btn';
-    btn.textContent = reply;
+    btn.textContent = replyItem.text;
     btn.disabled = gameState.ended || gameState.round > 5;
     btn.addEventListener('click', () => {
-      handleSend(reply);
+      handleSend(replyItem.text);
     });
     suggestedReplies.appendChild(btn);
+    shownSuggestionKeys.add(normalizeSuggestionKey(replyItem.text));
   });
 }
 
@@ -1524,7 +1731,8 @@ async function generateInterventionAnalysis() {
         intervention_history: interventionHistory,
         stars: gameState.stars,
         strikes: gameState.strikes,
-        outcome: gameState.endType
+        outcome: gameState.endType,
+        language: getLanguage()
       })
     });
     
@@ -1568,10 +1776,10 @@ function generateLocalAnalysis() {
       // Use actual result if available
       if (intervention.was_positive) {
         evaluation = 'positive';
-        reason = t('analysis.local.reasons.positiveEffective');
+        reason = intervention.evaluation_reason || t('analysis.local.reasons.positiveEffective');
       } else if (intervention.was_negative) {
         evaluation = 'negative';
-        reason = t('analysis.local.reasons.negativeIneffective');
+        reason = intervention.evaluation_reason || t('analysis.local.reasons.negativeIneffective');
       } else if (isPositive && !isCommand && isSupportive) {
         evaluation = 'positive';
         reason = t('analysis.local.reasons.positiveSupportive');
@@ -1841,7 +2049,8 @@ async function generateSuggestions() {
           action: chipState.action
         },
         draft: draft,
-        language: lang
+        language: lang,
+        seen_suggestions: Array.from(shownSuggestionKeys)
       })
     });
     
