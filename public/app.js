@@ -18,7 +18,6 @@ const chatHistory = document.getElementById('chat-history');
 const suggestedReplies = document.getElementById('suggested-replies');
 const messageInput = document.getElementById('message-input');
 const sendBtn = document.getElementById('send-btn');
-const draftPreview = document.getElementById('draft-preview');
 const clearChipsBtn = document.getElementById('clear-chips-btn');
 const generateSuggestionsBtn = document.getElementById('generate-suggestions-btn');
 const introCard = document.getElementById('intro-card');
@@ -98,16 +97,16 @@ const uiTuneDefaults = {
   messageFontSize: 28,
   
   // Intro card font sizes
-  introTitleFontSize: 24,
-  introSubtitleFontSize: 16,
-  introButtonFontSize: 16,
+  introTitleFontSize: 40,
+  introSubtitleFontSize: 40,
+  introButtonFontSize: 40,
   
   // Chip font size
   chipFontSize: 28,
   
   // Thought bubble tuning
-  thoughtX: 55, // percentage
-  thoughtY: 26, // percentage
+  thoughtX: 56, // percentage
+  thoughtY: 13, // percentage
   thoughtWidth: 260,
   thoughtFontSize: 28,
   thoughtDurationMs: 300,
@@ -290,13 +289,6 @@ function updateLanguageButtons() {
 
 function updateLanguageSpecificElements() {
   if (messageInput) messageInput.placeholder = t('input.placeholder');
-  if (draftPreview) {
-    const placeholder = t('draft.placeholder');
-    const currentText = draftPreview.textContent.trim();
-    if (!currentText || currentText === translations.en.draft.placeholder || currentText === translations.zh_TW.draft.placeholder) {
-      draftPreview.textContent = placeholder;
-    }
-  }
   updateMoreOptionsButton();
   updateLLMStatus(currentLLMStatus);
   updateLanguageButtons();
@@ -999,8 +991,8 @@ function initializeApp() {
   
   // Event listeners (for when main content is shown)
   sendBtn.addEventListener('click', () => handleSend());
-  messageInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+  messageInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       handleSend();
     }
@@ -1162,12 +1154,6 @@ async function handleSend(messageText) {
     text = messageInput.value.trim();
   }
   
-  // If empty, try draft preview
-  if (!text && draftPreview) {
-    text = draftPreview.textContent.trim();
-    if (text === t('draft.placeholder')) text = '';
-  }
-
   const lang = getLanguage();
   
   // #region agent log
@@ -1354,14 +1340,27 @@ async function processLLMResponse(data) {
   addMessage('kid', data.kid_reply);
   gameState.history.push({ role: 'kid', text: data.kid_reply });
   
-  // Determine score by deterministic evaluator result only.
+  // Prefer deterministic evaluator deltas; fallback to emotion when both are 0.
   let wasPositive = false;
   let wasNegative = false;
-  if (Number(data.star_delta) === 1) {
+  const starDelta = Number(data.star_delta) === 1 ? 1 : 0;
+  const xDelta = Number(data.x_delta) === 1 ? 1 : 0;
+  const emotion = String(data.emotion || '').toLowerCase();
+  const positiveEmotions = ['good', 'happy'];
+  const negativeEmotions = ['confused', 'sad', 'overwhelmed', 'defensive'];
+
+  let resolvedStar = starDelta;
+  let resolvedX = xDelta;
+  if (resolvedStar === 0 && resolvedX === 0) {
+    if (positiveEmotions.includes(emotion)) resolvedStar = 1;
+    if (negativeEmotions.includes(emotion)) resolvedX = 1;
+  }
+
+  if (resolvedStar === 1) {
     gameState.stars = Math.min(gameState.stars + 1, 3);
     wasPositive = true;
   }
-  if (Number(data.x_delta) === 1) {
+  if (resolvedX === 1) {
     gameState.strikes = Math.min(gameState.strikes + 1, 3);
     wasNegative = true;
   }
@@ -1969,11 +1968,7 @@ function generateDraft() {
     parts.push(actions);
   }
   
-  const draft = parts.length > 0 ? parts.join(' ') : t('draft.placeholder');
-  if (draftPreview) {
-    draftPreview.textContent = draft;
-  }
-  return draft;
+  return parts.length > 0 ? parts.join(' ') : t('draft.placeholder');
 }
 
 // Toggle chip selection

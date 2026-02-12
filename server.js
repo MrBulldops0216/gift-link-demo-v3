@@ -399,6 +399,10 @@ function evaluateIntervention(adultMessage, lang) {
     /click it|go ahead|just click|trust it|it's fine|do it now|obey me|no questions|i order you/i,
     /快點(點|按)|立刻(點|按)|馬上(點|按)|直接(點|按)|照我說的做|不准問|閉嘴|我命令你|聽我的就好/
   ];
+  const abusivePatterns = [
+    /fuck|f\*ck|shit|idiot|stupid|dumb|shut up|bitch|moron|asshole/i,
+    /他媽|他妈|媽的|妈的|白痴|笨蛋|閉嘴|滚|滾|智障|去死/
+  ];
   const boundaryPatterns = [
     /don't click|do not click|stop|wait|hold on|let's pause/i,
     /不要點|先別點|先停|暫停|等等|先不急|先不要按/
@@ -417,23 +421,26 @@ function evaluateIntervention(adultMessage, lang) {
   ];
 
   const hasNegative = negativePatterns.some(p => p.test(msgLower) || p.test(msgRaw));
+  const hasAbusive = abusivePatterns.some(p => p.test(msgLower) || p.test(msgRaw));
   const hasBoundary = boundaryPatterns.some(p => p.test(msgLower) || p.test(msgRaw));
   const hasReason = reasonPatterns.some(p => p.test(msgLower) || p.test(msgRaw));
   const hasGuided = guidancePatterns.some(p => p.test(msgLower) || p.test(msgRaw));
   const hasSupport = supportPatterns.some(p => p.test(msgLower) || p.test(msgRaw));
 
   const scores = {
-    explanation_vs_command: hasNegative ? -1 : (hasBoundary || hasReason ? 1 : 0),
-    emotional_stabilization: hasNegative ? -1 : (hasSupport || hasGuided ? 1 : 0),
+    explanation_vs_command: (hasNegative || hasAbusive) ? -1 : (hasBoundary || hasReason ? 1 : 0),
+    emotional_stabilization: (hasNegative || hasAbusive) ? -1 : (hasSupport || hasGuided ? 1 : 0),
     guided_decision: hasGuided ? 1 : 0
   };
   const total = scores.explanation_vs_command + scores.emotional_stabilization + scores.guided_decision;
-  const is_positive = total > 0 && !hasNegative;
+  const is_positive = total > 0 && !hasNegative && !hasAbusive;
   const star_delta = is_positive ? 1 : 0;
-  const x_delta = hasNegative ? 1 : 0;
+  const x_delta = (hasNegative || hasAbusive) ? 1 : 0;
 
   let reason_code = 'neutral_unclear';
-  if (x_delta === 1) {
+  if (hasAbusive) {
+    reason_code = 'abusive_language';
+  } else if (x_delta === 1) {
     reason_code = 'unsafe_encouragement';
   } else if (scores.explanation_vs_command === 1 && scores.emotional_stabilization === 1 && scores.guided_decision === 1) {
     reason_code = 'supportive_explain_guide';
@@ -448,6 +455,7 @@ function evaluateIntervention(adultMessage, lang) {
   const reasonText =
     lang === 'zh_TW'
       ? {
+          abusive_language: '這句包含辱罵或攻擊性語言，會直接傷害孩子並破壞溝通安全。',
           unsafe_encouragement: '你的話語有鼓勵冒險點擊的傾向，這會提高失誤風險。',
           supportive_explain_guide: '你同時做到了安撫、解釋與引導，屬於高品質干預。',
           supportive_with_reason: '你有安撫並說明原因，能幫助孩子理解而不只是服從。',
@@ -456,6 +464,7 @@ function evaluateIntervention(adultMessage, lang) {
           neutral_unclear: '這次回覆較中性，安全訊息不夠明確。'
         }[reason_code]
       : {
+          abusive_language: 'This reply includes abusive language and directly harms emotional safety.',
           unsafe_encouragement: 'Your wording encourages risky clicking and increases the chance of unsafe action.',
           supportive_explain_guide: 'You combined emotional support, clear reason, and guided decision-making effectively.',
           supportive_with_reason: 'You used a calm tone and provided reasons, which supports understanding.',
@@ -468,7 +477,7 @@ function evaluateIntervention(adultMessage, lang) {
     ? {
         summary: reasonText,
         strengths: is_positive ? ['冷靜且兒童友好'] : [],
-        risks: x_delta ? ['可能會直接引發不安全點擊'] : !is_positive ? ['可能會增加情緒負擔'] : [],
+        risks: hasAbusive ? ['可能會直接傷害孩子並升高對立'] : x_delta ? ['可能會直接引發不安全點擊'] : !is_positive ? ['可能會增加情緒負擔'] : [],
         suggestions: [
           '讓我們暫停一下。我們可以檢查是誰發送的。',
           '我們不會先點擊獎品。我們先問大人。',
@@ -479,7 +488,7 @@ function evaluateIntervention(adultMessage, lang) {
     : {
         summary: reasonText,
         strengths: is_positive ? ['Calm and child-friendly'] : [],
-        risks: x_delta ? ['Can directly trigger unsafe clicking'] : !is_positive ? ['May raise emotional load'] : [],
+        risks: hasAbusive ? ['Can directly harm the child and escalate conflict'] : x_delta ? ['Can directly trigger unsafe clicking'] : !is_positive ? ['May raise emotional load'] : [],
         suggestions: [
           'Let’s pause. We can check who sent it.',
           'We don’t click prizes first. We ask an adult.',
