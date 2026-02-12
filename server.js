@@ -89,6 +89,10 @@ SCERTS constraints (Social Communication + Emotion Regulation):
 - Avoid abstract reasoning, metaphors, moralizing, adult tone.
 - Maintain emotional_load in [0,10]. Commanding/blaming increases it; calm supportive explanations decrease it.
 - When emotional_load is high: shorter, fragmented, avoidant.
+- Keep persona consistent: curious, reward-motivated, needs structure, sensitive to pressure.
+- Continuity is mandatory: reply must connect to latest parent line and recent dialogue state.
+- Vary wording naturally across turns. Do not reuse the same child sentence pattern repeatedly.
+- Child can still feel curiosity/doubt even when cooperating; avoid sudden personality flips.
 
 OUTPUT (STRICT JSON ONLY):
 {
@@ -217,6 +221,144 @@ function ensureNotRepeatedChildReply(reply, history, lang, emotionLabel) {
     if (!recentSet.has(normalizeTextKey(alt))) return alt;
   }
   return current + (lang === 'zh_TW' ? ' 我想慢慢來。' : ' I need to go slowly.');
+}
+
+function inferMemoryTags({ history = [], adultMessage = '', emotionalLoad = 5 }) {
+  const cleanHistory = sanitizeHistory(history);
+  const lastKid = getLastByRole(cleanHistory, 'kid');
+  const recentText = `${lastKid} ${adultMessage}`;
+  const lower = recentText.toLowerCase();
+
+  let concern_focus = 'uncertainty_source';
+  if (/(獎品|禮物|gift|prize|好想要|tempt)/i.test(recentText)) {
+    concern_focus = 'reward_temptation';
+  } else if (/(怕|生氣|被罵|责备|罵|mad|blame|angry|trouble)/i.test(recentText)) {
+    concern_focus = 'fear_of_blame';
+  } else if (/(關掉|關閉|x|close|dismiss|exit|叉)/i.test(recentText)) {
+    concern_focus = 'action_close_popup';
+  } else if (/(誰發的|來源|網址|sender|source|address|link)/i.test(recentText)) {
+    concern_focus = 'uncertainty_source';
+  }
+
+  let cooperation_level = 'hesitant';
+  if (/(我會|好，我|先不點|我先停|okay|ok|i will|i can|let us|together)/i.test(recentText)) {
+    cooperation_level = 'cooperative';
+  } else if (/(不要|不聽|才不要|想點|想按|click now|won't|no)/i.test(recentText)) {
+    cooperation_level = 'resistant';
+  }
+
+  let regulation_state = 'tense';
+  const load = Number.isFinite(Number(emotionalLoad)) ? Number(emotionalLoad) : 5;
+  if (load >= 7) regulation_state = 'overloaded';
+  else if (load <= 3) regulation_state = 'settled';
+
+  let parent_style_last_turn = 'neutral';
+  if (/(他媽|他妈|白痴|笨蛋|閉嘴|fuck|shit|idiot|stupid)/i.test(adultMessage)) {
+    parent_style_last_turn = 'abusive';
+  } else if (/(命令|照我說|不准|閉嘴|i order|obey|no questions)/i.test(adultMessage)) {
+    parent_style_last_turn = 'commanding';
+  } else if (/(你覺得|可以嗎|要不要|what do you think|can you|could you|let us)/i.test(adultMessage)) {
+    parent_style_last_turn = 'guiding';
+  } else if (/(我陪你|不急|先深呼吸|我在這裡|i am with you|no rush|breathe)/i.test(adultMessage)) {
+    parent_style_last_turn = 'supportive';
+  }
+
+  return {
+    concern_focus,
+    cooperation_level,
+    regulation_state,
+    parent_style_last_turn
+  };
+}
+
+function isQuestionLike(text) {
+  const raw = String(text || '');
+  const lower = raw.toLowerCase();
+  return (
+    raw.includes('?') ||
+    raw.includes('？') ||
+    /(為什麼|为什么|哪裡|哪里|怎麼|怎么|誰|谁|什麼|什么|可以嗎|可不可以|你覺得|你觉得)/.test(raw) ||
+    /(why|what|where|how|who|do you think|can you|could you|which part)/.test(lower)
+  );
+}
+
+function looksLikeWeakQuestionAnswer(reply) {
+  const text = String(reply || '').trim();
+  if (!text) return true;
+  const lower = text.toLowerCase();
+  const weakLead =
+    /^(好|嗯|我知道了|我會|我先|ok|okay|got it|i will|i can|sure)[，。,!\s]/i.test(text);
+  const hasConcreteDetail =
+    /(連結|弹窗|彈窗|網址|按钮|按鈕|來源|可疑|獎品|gift|link|popup|sender|address|button|suspicious|close)/i.test(text) ||
+    text.length >= 14;
+  return weakLead && !hasConcreteDetail;
+}
+
+function shouldRewriteForContinuity({ reply, adultMessage, history }) {
+  const current = normalizeTextKey(reply);
+  if (!current) return true;
+  const recentKidSet = new Set(getRecentKidReplies(history, 3).map(normalizeTextKey));
+  if (recentKidSet.has(current)) return true;
+  if (isQuestionLike(adultMessage) && looksLikeWeakQuestionAnswer(reply)) return true;
+  return false;
+}
+
+async function rewriteChildReplyForContinuity({
+  lang,
+  adultMessage,
+  history,
+  emotionLabel,
+  emotionalLoad,
+  childReply,
+  thoughtBubble,
+  memoryTags
+}) {
+  const recentHistory = sanitizeHistory(history).slice(-6);
+  const banned = getRecentKidReplies(history, 4).map(s => `- ${s}`).join('\n') || '- (none)';
+  const system = `You rewrite a child's response for continuity in a roleplay.
+Return JSON ONLY:
+{
+  "child_reply": "...",
+  "thought_bubble": "..."
+}
+Rules:
+- Keep child age 8-10, ASD communication style (concrete, short, literal).
+- Keep the same emotion label intent: ${emotionLabel}.
+- Keep emotional_load near ${Number.isFinite(emotionalLoad) ? emotionalLoad : 5} (plus/minus 1).
+- Directly respond to latest parent message.
+- Use memory tags as context anchors for continuity:
+${JSON.stringify(memoryTags || {}, null, 2)}
+- Add one concrete detail from context (popup/link/sender/button/suspicious/close) naturally.
+- Never use any banned previous child lines.
+- No adult coaching language.
+- ${languageInstruction(lang)}`;
+  const user = `Latest parent message:
+${adultMessage}
+
+Recent dialogue:
+${recentHistory.map((h, i) => `${i + 1}. ${h.role === 'adult' ? 'Parent' : 'Child'}: ${h.text}`).join('\n') || '(none)'}
+
+Current child_reply (needs rewrite):
+${childReply}
+
+Current thought_bubble:
+${thoughtBubble || ''}
+
+Banned previous child lines:
+${banned}`;
+  const content = await callGroq(
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: user }
+    ],
+    { temperature: 0.55, timeoutMs: 18000 }
+  );
+  const json = extractJSON(content);
+  if (!json) return null;
+  const rewrittenReply = clampWords(String(json.child_reply || '').trim(), 20);
+  const rewrittenThought = String(json.thought_bubble || '').trim();
+  if (!rewrittenReply) return null;
+  return { child_reply: rewrittenReply, thought_bubble: rewrittenThought };
 }
 
 function normalizeEmotionLabel(raw) {
@@ -516,6 +658,11 @@ app.post('/api/child-reply', async (req, res) => {
   const cleanHistory = sanitizeHistory(history);
   const recentHistory = cleanHistory.slice(-6);
   const turnIndex = Math.floor(recentHistory.length / 2) + 1;
+  const memoryTags = inferMemoryTags({
+    history: cleanHistory,
+    adultMessage: adult_message,
+    emotionalLoad: emotional_load
+  });
 
   const messages = [
     { role: 'system', content: getChildSystemPrompt(lang) },
@@ -523,6 +670,7 @@ app.post('/api/child-reply', async (req, res) => {
       role: 'system',
       content:
         `Scenario: child sees a prize popup link and wants to click. Current emotional_load: ${emotional_load}. ` +
+        `Memory tags (internal continuity state): ${JSON.stringify(memoryTags)}. ` +
         `Turn: ${turnIndex}. Conversation so far (latest ${recentHistory.length} messages, real dialogue only):\n` +
         recentHistory.map((h, i) => `${i + 1}. ${h.role === 'adult' ? 'Parent' : 'Alex'}: ${h.text}`).join('\n')
     }
@@ -546,12 +694,34 @@ app.post('/api/child-reply', async (req, res) => {
       thought_bubble: json.thought_bubble || ''
     };
     out.child_reply = alignChildReplyWithEmotion(out.child_reply, out.emotion_label, lang);
+    if (shouldRewriteForContinuity({ reply: out.child_reply, adultMessage: adult_message, history: cleanHistory })) {
+      try {
+        const rewritten = await rewriteChildReplyForContinuity({
+          lang,
+          adultMessage: adult_message,
+          history: cleanHistory,
+          emotionLabel: out.emotion_label,
+          emotionalLoad: out.emotional_load,
+          childReply: out.child_reply,
+          thoughtBubble: out.thought_bubble,
+          memoryTags
+        });
+        if (rewritten?.child_reply) {
+          out.child_reply = rewritten.child_reply;
+          if (rewritten.thought_bubble) out.thought_bubble = rewritten.thought_bubble;
+        }
+      } catch {
+        // Keep original output if rewrite fails.
+      }
+    }
+    out.memory_tags = memoryTags;
     out.child_reply = ensureNotRepeatedChildReply(out.child_reply, cleanHistory, lang, out.emotion_label);
     return res.json(out);
   } catch {
     const fallback = getFallbackChildReply(lang);
     fallback.emotion_label = normalizeEmotionLabel(fallback.emotion_label);
     fallback.child_reply = alignChildReplyWithEmotion(fallback.child_reply, fallback.emotion_label, lang);
+    fallback.memory_tags = memoryTags;
     fallback.child_reply = ensureNotRepeatedChildReply(fallback.child_reply, cleanHistory, lang, fallback.emotion_label);
     return res.json(fallback);
   }
@@ -581,9 +751,7 @@ app.post('/api/suggestions', async (req, res) => {
   return res.json({ suggestions });
 });
 
-app.post('/api/analyze-interventions', async (req, res) => {
-  const { intervention_history = [], outcome = 'partial_success', language } = req.body || {};
-  const lang = normalizeLanguage(language);
+function buildDeterministicAnalysis(interventionHistory, outcome, lang) {
   const summary =
     lang === 'zh_TW'
       ? outcome === 'success'
@@ -593,8 +761,8 @@ app.post('/api/analyze-interventions', async (req, res) => {
         ? 'You successfully helped the child make safe choices.'
         : 'The child clicked the link. Guidance can be improved.';
 
-  const interventions = Array.isArray(intervention_history)
-    ? intervention_history.map(item => ({
+  const interventions = Array.isArray(interventionHistory)
+    ? interventionHistory.map(item => ({
         round: item.round,
         adult_message: item.adult_message,
         child_reply: item.child_reply,
@@ -613,12 +781,97 @@ app.post('/api/analyze-interventions', async (req, res) => {
       }))
     : [];
 
-  return res.json({
-    analysis: {
-      summary,
-      interventions
+  return { summary, interventions };
+}
+
+function getAnalysisSystemPrompt(lang) {
+  return `You are an evaluator for parent mediation in child digital safety intervention.
+Use parent mediation theory and child emotion dynamics to assess each turn:
+- Active mediation: explain why, discuss risk in child-friendly language.
+- Restrictive mediation: set boundaries without harsh control.
+- Co-use / guided participation: collaborate and co-regulate.
+- Emotion coaching: validate, reduce arousal, avoid shame/threat.
+
+Return STRICT JSON ONLY:
+{
+  "summary": "overall evaluation in 2-4 sentences",
+  "interventions": [
+    {
+      "round": number,
+      "evaluation": "positive|neutral|negative",
+      "reason": "specific turn-level explanation grounded in theory and child emotional reaction"
     }
-  });
+  ]
+}
+
+Rules:
+- Evaluate the actual parent wording, do not use generic template lines.
+- Distinguish neutral vs negative clearly.
+- Mention at least one concrete phrase or behavior from that round.
+- ${languageInstruction(lang)}`;
+}
+
+app.post('/api/analyze-interventions', async (req, res) => {
+  const { intervention_history = [], outcome = 'partial_success', language } = req.body || {};
+  const lang = normalizeLanguage(language);
+  const fallback = buildDeterministicAnalysis(intervention_history, outcome, lang);
+
+  if (!GROQ_API_KEY || !Array.isArray(intervention_history) || intervention_history.length === 0) {
+    return res.json({ analysis: fallback });
+  }
+
+  try {
+    const compactHistory = intervention_history.map(item => ({
+      round: item.round,
+      adult_message: String(item.adult_message || '').slice(0, 220),
+      child_reply: String(item.child_reply || '').slice(0, 220),
+      child_emotion: item.emotion || '',
+      child_thought: String(item.thought || '').slice(0, 180),
+      prior_eval: item.was_positive ? 'positive' : item.was_negative ? 'negative' : 'neutral',
+      prior_reason: String(item.evaluation_reason || '').slice(0, 220)
+    }));
+    const userPrompt = `Outcome: ${outcome}
+Interventions JSON:
+${JSON.stringify(compactHistory, null, 2)}
+
+Generate detailed analysis JSON now.`;
+    const content = await callGroq(
+      [
+        { role: 'system', content: getAnalysisSystemPrompt(lang) },
+        { role: 'user', content: userPrompt }
+      ],
+      { temperature: 0.35, timeoutMs: 28000 }
+    );
+    const parsed = extractJSON(content);
+    if (!parsed || typeof parsed !== 'object') throw new Error('Bad analysis JSON');
+
+    const rawList = Array.isArray(parsed.interventions) ? parsed.interventions : [];
+    const byRound = new Map(rawList.map(item => [Number(item?.round), item]));
+    const interventions = intervention_history.map((src, idx) => {
+      const roundNum = Number(src.round) || idx + 1;
+      const llmItem = byRound.get(roundNum) || rawList[idx] || {};
+      const evaluation = ['positive', 'neutral', 'negative'].includes(String(llmItem.evaluation))
+        ? String(llmItem.evaluation)
+        : (src.was_positive ? 'positive' : src.was_negative ? 'negative' : 'neutral');
+      const reason = String(llmItem.reason || '').trim() || fallback.interventions[idx]?.reason || '';
+      return {
+        round: roundNum,
+        adult_message: src.adult_message,
+        child_reply: src.child_reply,
+        evaluation,
+        reason
+      };
+    });
+
+    return res.json({
+      analysis: {
+        summary: String(parsed.summary || '').trim() || fallback.summary,
+        interventions
+      }
+    });
+  } catch {
+    return res.json({ analysis: fallback });
+  }
 });
 
 app.get('/api/health', (req, res) => {
